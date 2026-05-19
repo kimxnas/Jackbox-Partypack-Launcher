@@ -24,7 +24,14 @@ Head to [**Releases**](https://github.com/kimxnas/Jackbox-Partypack-Launcher/rel
 3. Click **⚙** → **Auto-detect from folder…** and select your Jackbox games folder
 4. Select a pack from the dropdown and hit **Play!**
 
-> Settings (including game paths) are saved to `launcher_settings.json` next to the exe.
+> Settings (including game paths) are saved automatically in the background.
+
+## Planned
+
+- **Game recommendations** — suggest which pack to play based on player count or mood
+- **Modernized UI** — optional sleek dark theme to replace the default look
+- **Recently played** — track and quickly relaunch your most played packs
+- **Custom banners** — let users swap in their own header image
 
 ## Build from source
 
