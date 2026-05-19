@@ -17,10 +17,11 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 def get_data_dir():
-    """Writable directory next to the exe (not MEIPASS, which is temp/read-only)."""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    """Writable app data directory, hidden from the user."""
+    base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    path = os.path.join(base, "JackboxLauncher")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 SETTINGS_PATH = Path(get_data_dir()) / "launcher_settings.json"
 
