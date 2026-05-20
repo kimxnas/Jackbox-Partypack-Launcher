@@ -1,12 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['launcher.py'],
     pathex=[],
     binaries=[],
-    datas=[('game_images/*.jpg', 'game_images'), ('icon.ico', '.'), ('1111111111.png', '.')],
-    hiddenimports=[],
+    datas=[
+        ('game_images/*.jpg', 'game_images'),
+        ('icon.ico', '.'),
+    ],
+    hiddenimports=['ui_classic', 'ui_modern'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
