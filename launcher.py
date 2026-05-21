@@ -56,8 +56,8 @@ if __name__ == "__main__":
     game_paths = {**DEFAULT_GAME_PATHS, **settings.get("game_paths", {})}
     theme = settings.get("ui_theme", "classic")
 
-    # Use sys.argv[0] — the actual path Windows used to launch the process
-    # (script path in dev mode, exe path when compiled with Nuitka/PyInstaller)
+    # Use sys.argv[0] — it's the actual path Windows used to launch the process
+    # (script path in dev mode, exe path when compiled)
     argv0 = os.path.abspath(sys.argv[0])
     if argv0.lower().endswith('.py'):
         restart_args = [sys.executable, argv0]

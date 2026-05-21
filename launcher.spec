@@ -1,14 +1,12 @@
+from PyInstaller.utils.hooks import copy_metadata, collect_data_files
 # -*- mode: python ; coding: utf-8 -*-
+
 
 a = Analysis(
     ['launcher.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('game_images/*.jpg', 'game_images'),
-        ('icon.ico', '.'),
-    ],
-    hiddenimports=['ui_classic', 'ui_modern'],
+	datas=[('icon.ico', '.'), ('1111111111.png', '.'), ('game_images', 'game_images')] + collect_data_files('jaraco.text'),    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -24,11 +22,11 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='JackboxPartypackLauncher',
+    name='launcher',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -37,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
 )

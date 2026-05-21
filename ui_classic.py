@@ -97,7 +97,6 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         except Exception:
             pass
 
-        # UI Style
         style_frame = tk.LabelFrame(win, text="UI Style", font=("Segoe UI", 9), padx=8, pady=6)
         style_frame.pack(padx=16, pady=(12, 0), fill="x")
 
@@ -105,7 +104,6 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         tk.Radiobutton(style_frame, text="Classic", variable=style_var, value="classic", font=("Segoe UI", 9)).pack(side="left")
         tk.Radiobutton(style_frame, text="Modern", variable=style_var, value="modern", font=("Segoe UI", 9)).pack(side="left", padx=(12, 0))
 
-        # Paths
         header_frame = tk.Frame(win)
         header_frame.pack(padx=16, pady=(10, 0), fill="x")
         tk.Label(header_frame, text="Set the path to each game's .exe file.", font=("Segoe UI", 9), fg="gray").pack(side="left")
