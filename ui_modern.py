@@ -1,11 +1,14 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-from PIL import Image
+from PIL import Image, ImageDraw
 import os
 import re
 import sys
+import json
 import random
+import webbrowser
 import subprocess
+import urllib.request
 from pathlib import Path
 
 ctk.set_appearance_mode("dark")
@@ -25,7 +28,7 @@ TEXT     = "#FFFFFF"
 SUBTEXT  = "#C0A0E0"
 
 BASE_W  = 620
-BASE_H  = 510
+BASE_H  = 485
 PANEL_W = 340
 ANIM_FRAMES   = 20
 ANIM_INTERVAL = 8
@@ -104,10 +107,17 @@ GAME_INFO = {
 }
 
 
-def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
+def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
+        current_version="1.0.0", github_repo=""):
     image_cache  = {}
     panel_open   = [False]
     anim_running = [False]
+
+    def version_tuple(v):
+        try:
+            return tuple(int(x) for x in v.lstrip('v').split('.'))
+        except Exception:
+            return (0,)
 
     root = ctk.CTk()
     root.title("Jackbox Launcher")
@@ -154,15 +164,58 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         command=lambda: open_settings(),
     ).place(relx=1.0, x=-16, rely=0.5, anchor="e")
 
-    # ── Game image ────────────────────────────────────────────────────
-    img_outer = ctk.CTkFrame(left, fg_color=BORDER, corner_radius=14)
-    img_outer.pack(padx=20, pady=(14, 0))
+    recommend_btn = ctk.CTkButton(
+        header, text="🎲  Find a Game",
+        font=("Segoe UI", 11),
+        fg_color=CARD_BG, hover_color=BORDER,
+        text_color=CYAN, corner_radius=15,
+        width=130, height=32,
+        command=lambda: toggle_panel(),
+    )
+    if settings.get("show_find_a_game", True):
+        recommend_btn.place(relx=1.0, x=-68, rely=0.5, anchor="e")
 
-    img_label = ctk.CTkLabel(img_outer, text="", width=560, height=214)
-    img_label.pack(padx=2, pady=2)
+    # ── Game image ────────────────────────────────────────────────────
+    # Border + rounded corners are baked into the PIL image to avoid
+    # CTk-vs-PIL corner-curve mismatch
+    img_label = ctk.CTkLabel(left, text="")
+    img_label.pack(pady=(14, 0))
 
     def sanitize(name):
         return re.sub(r'[^A-Za-z0-9_-]', '', name.replace(" ", "_"))
+
+    def round_image(pil, inner_radius=14, border=2, ssaa=4):
+        """Bake border + rounded corners into a single flat image (no CTk frame needed)."""
+        inner_w, inner_h = 560, 214
+        outer_w, outer_h = inner_w + border * 2, inner_h + border * 2
+        outer_radius = inner_radius + border
+
+        pil = pil.convert("RGB").resize((inner_w, inner_h), Image.Resampling.LANCZOS)
+
+        # Supersampled outer rounded mask — clips border+image into rounded shape on BG
+        big = (outer_w * ssaa, outer_h * ssaa)
+        outer_mask = Image.new("L", big, 0)
+        ImageDraw.Draw(outer_mask).rounded_rectangle(
+            (0, 0, big[0], big[1]), outer_radius * ssaa, fill=255
+        )
+        outer_mask = outer_mask.resize((outer_w, outer_h), Image.Resampling.LANCZOS)
+
+        # Composite BORDER onto BG using outer mask → rounded purple shape
+        bg_layer = Image.new("RGB", (outer_w, outer_h), BG)
+        border_layer = Image.new("RGB", (outer_w, outer_h), BORDER)
+        result = Image.composite(border_layer, bg_layer, outer_mask)
+
+        # Supersampled inner rounded mask for the actual game image
+        big_i = (inner_w * ssaa, inner_h * ssaa)
+        inner_mask = Image.new("L", big_i, 0)
+        ImageDraw.Draw(inner_mask).rounded_rectangle(
+            (0, 0, big_i[0], big_i[1]), inner_radius * ssaa, fill=255
+        )
+        inner_mask = inner_mask.resize((inner_w, inner_h), Image.Resampling.LANCZOS)
+
+        # Paste the game image centered inside the border
+        result.paste(pil, (border, border), mask=inner_mask)
+        return result
 
     def update_image(*_):
         key = sanitize(selected_game.get())
@@ -172,8 +225,9 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         for ext in [".jpg", ".jpeg", ".png", ".webp"]:
             p = Path(resource_path_fn("game_images")) / f"{key}{ext}"
             if p.exists():
-                pil = Image.open(p).resize((560, 214), Image.Resampling.LANCZOS)
-                ctk_img = ctk.CTkImage(light_image=pil, dark_image=pil, size=(560, 214))
+                pil = Image.open(p)
+                pil = round_image(pil)  # returns 564×218 with border baked in
+                ctk_img = ctk.CTkImage(light_image=pil, dark_image=pil, size=(564, 218))
                 image_cache[key] = ctk_img
                 img_label.configure(image=ctk_img)
                 return
@@ -193,6 +247,32 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         dynamic_resizing=False, width=580, height=44, corner_radius=10,
     ).pack(pady=(12, 0))
 
+    # ── Recently played row ───────────────────────────────────────────
+    recent_frame = ctk.CTkFrame(left, fg_color="transparent")
+    # packed/forgotten dynamically by render_recent()
+
+    def render_recent():
+        for w in recent_frame.winfo_children():
+            w.destroy()
+        recent = settings.get("recent_games", [])
+        show = settings.get("show_recent", True)
+        if not show or not recent:
+            recent_frame.pack_forget()
+            return
+        ctk.CTkLabel(recent_frame, text="Recent:", font=("Segoe UI", 11), text_color=SUBTEXT).pack(side="left", padx=(0, 8))
+        for pack_name in recent[:3]:
+            if pack_name not in game_paths:
+                continue
+            short = pack_name.replace("The Jackbox Party Pack", "Pack")
+            ctk.CTkButton(
+                recent_frame, text=short,
+                width=82, height=26, corner_radius=13,
+                fg_color=CARD_BG, hover_color=BORDER,
+                text_color=CYAN, font=("Segoe UI", 10),
+                command=lambda p=pack_name: selected_game.set(p),
+            ).pack(side="left", padx=3)
+        recent_frame.pack(pady=(10, 0))
+
     # ── Play button ───────────────────────────────────────────────────
     ctk.CTkButton(
         left, text="▶   PLAY!",
@@ -202,35 +282,9 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         command=lambda: launch_game(),
     ).pack(pady=(12, 0))
 
-    # ── Bottom row ────────────────────────────────────────────────────
-    bottom = ctk.CTkFrame(left, fg_color="transparent")
-    bottom.pack(padx=30, pady=(10, 0), fill="x")
-
+    # Variables previously in bottom row checkboxes — now lived in settings
     close_var  = ctk.BooleanVar(value=settings.get("close_after_launch", False))
     prompt_var = ctk.BooleanVar(value=settings.get("show_launch_prompt", True))
-
-    def on_check():
-        settings["close_after_launch"] = close_var.get()
-        settings["show_launch_prompt"] = prompt_var.get()
-        save_settings_fn(settings)
-
-    for text, var in [("Close after launch", close_var), ("Show confirmation", prompt_var)]:
-        ctk.CTkCheckBox(
-            bottom, text=text, variable=var, command=on_check,
-            font=("Segoe UI", 11), text_color=SUBTEXT,
-            fg_color=PINK, hover_color=PINK_H,
-            checkmark_color=TEXT, border_color=BORDER,
-        ).pack(side="left", padx=(0, 20))
-
-    recommend_btn = ctk.CTkButton(
-        bottom, text="🎲  Find a Game",
-        font=("Segoe UI", 11),
-        fg_color=CARD_BG, hover_color=BORDER,
-        text_color=CYAN, corner_radius=20,
-        width=130, height=30,
-        command=lambda: toggle_panel(),
-    )
-    recommend_btn.pack(side="right")
 
     # ── Right panel content ───────────────────────────────────────────
     ctk.CTkLabel(right_inner, text="FIND A GAME", font=("Impact", 24), text_color=CYAN).pack(pady=(20, 4))
@@ -395,7 +449,7 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
     def open_settings():
         win = ctk.CTkToplevel(root)
         win.title("Settings")
-        win.geometry("680x560")
+        win.geometry("680x720")
         win.resizable(False, False)
         win.grab_set()
         win.configure(fg_color=BG)
@@ -416,6 +470,74 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
             unselected_color=CARD_BG, unselected_hover_color=BORDER,
             text_color="#0D0920", font=("Segoe UI", 12),
         ).pack(padx=14, pady=(0, 12), anchor="w")
+
+        # Launch behavior
+        beh_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
+        beh_card.pack(padx=16, pady=(10, 0), fill="x")
+        ctk.CTkLabel(beh_card, text="Launch Behavior", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", padx=14, pady=(10, 4))
+
+        close_set_var  = ctk.BooleanVar(value=settings.get("close_after_launch", False))
+        prompt_set_var = ctk.BooleanVar(value=settings.get("show_launch_prompt", True))
+
+        for text, var in [("Close launcher after launch", close_set_var),
+                          ("Show launch confirmation", prompt_set_var)]:
+            ctk.CTkCheckBox(
+                beh_card, text=text, variable=var,
+                font=("Segoe UI", 11), text_color=SUBTEXT,
+                fg_color=PINK, hover_color=PINK_H,
+                checkmark_color=TEXT, border_color=BORDER,
+            ).pack(anchor="w", padx=14, pady=2)
+        ctk.CTkFrame(beh_card, fg_color="transparent", height=8).pack()
+
+        # Visibility toggles
+        vis_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
+        vis_card.pack(padx=16, pady=(10, 0), fill="x")
+        ctk.CTkLabel(vis_card, text="Visibility", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", padx=14, pady=(10, 4))
+
+        show_recent_var = ctk.BooleanVar(value=settings.get("show_recent", True))
+        show_find_var   = ctk.BooleanVar(value=settings.get("show_find_a_game", True))
+
+        for text, var in [("Show recently played", show_recent_var),
+                          ("Show Find a Game button", show_find_var)]:
+            ctk.CTkCheckBox(
+                vis_card, text=text, variable=var,
+                font=("Segoe UI", 11), text_color=SUBTEXT,
+                fg_color=PINK, hover_color=PINK_H,
+                checkmark_color=TEXT, border_color=BORDER,
+            ).pack(anchor="w", padx=14, pady=2)
+        ctk.CTkFrame(vis_card, fg_color="transparent", height=8).pack()
+
+        # About / Updates
+        about_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
+        about_card.pack(padx=16, pady=(10, 0), fill="x")
+
+        about_row = ctk.CTkFrame(about_card, fg_color="transparent")
+        about_row.pack(padx=14, pady=10, fill="x")
+        ctk.CTkLabel(about_row, text=f"Version {current_version}",
+                     font=("Segoe UI", 11), text_color=SUBTEXT).pack(side="left")
+
+        def manual_check():
+            try:
+                url = f"https://api.github.com/repos/{github_repo}/releases/latest"
+                req = urllib.request.Request(url, headers={"User-Agent": "JackboxLauncher"})
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    data = json.loads(r.read())
+                latest = data.get("tag_name", "").lstrip("v")
+                if latest and version_tuple(latest) > version_tuple(current_version):
+                    if messagebox.askyesno("Update Available",
+                        f"v{latest} is available (you have v{current_version}).\n\nOpen the download page?",
+                        parent=win):
+                        webbrowser.open(f"https://github.com/{github_repo}/releases/latest")
+                else:
+                    messagebox.showinfo("Up to date", f"You're on the latest version (v{current_version}).", parent=win)
+            except Exception as e:
+                messagebox.showerror("Update check failed", f"Couldn't reach GitHub:\n{e}", parent=win)
+
+        ctk.CTkButton(
+            about_row, text="Check for updates", command=manual_check,
+            fg_color=CARD_BG, hover_color=BORDER,
+            font=("Segoe UI", 11), height=28, corner_radius=8, width=140,
+        ).pack(side="right")
 
         paths_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
         paths_card.pack(padx=16, pady=(10, 0), fill="both", expand=True)
@@ -488,7 +610,26 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
             new_theme = style_var.get()
             theme_changed = new_theme != settings.get("ui_theme", "modern")
             settings["ui_theme"] = new_theme
+            settings["show_recent"] = show_recent_var.get()
+            settings["show_find_a_game"] = show_find_var.get()
+            settings["close_after_launch"] = close_set_var.get()
+            settings["show_launch_prompt"] = prompt_set_var.get()
             save_settings_fn(settings)
+
+            # Sync the local BooleanVars used by launch_game
+            close_var.set(close_set_var.get())
+            prompt_var.set(prompt_set_var.get())
+
+            # Apply visibility changes live
+            render_recent()
+            if show_find_var.get():
+                if not recommend_btn.winfo_ismapped():
+                    recommend_btn.place(relx=1.0, x=-68, rely=0.5, anchor="e")
+            else:
+                recommend_btn.place_forget()
+                if panel_open[0]:  # close panel if it was open
+                    toggle_panel()
+
             win.destroy()
             if theme_changed:
                 # DETACHED_PROCESS (0x00000008) — escapes Nuitka's Job Object
@@ -504,6 +645,15 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
         ).pack(pady=(10, 14))
 
     # ── Launch ────────────────────────────────────────────────────────
+    def track_recent(name):
+        recent = settings.get("recent_games", [])
+        if name in recent:
+            recent.remove(name)
+        recent.insert(0, name)
+        settings["recent_games"] = recent[:3]
+        save_settings_fn(settings)
+        render_recent()
+
     def launch_game():
         name = selected_game.get()
         path = Path(game_paths[name])
@@ -512,6 +662,7 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
             return
         try:
             subprocess.Popen([str(path)], cwd=str(path.parent))
+            track_recent(name)
             if prompt_var.get():
                 messagebox.showinfo("Launching", f"Launching {name}!", parent=root)
             if close_var.get():
@@ -520,4 +671,5 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
             messagebox.showerror("Error", f"Could not launch:\n{e}", parent=root)
 
     update_image()
+    render_recent()
     root.mainloop()

@@ -7,7 +7,8 @@ import re
 import sys
 from pathlib import Path
 
-def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args):
+def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
+        current_version="1.0.0", github_repo=""):
     image_cache = {}
 
     root = tk.Tk()

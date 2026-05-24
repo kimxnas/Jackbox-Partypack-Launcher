@@ -4,6 +4,9 @@ import json
 import subprocess
 from pathlib import Path
 
+CURRENT_VERSION = "1.3.0"
+GITHUB_REPO = "kimxnas/Jackbox-Partypack-Launcher"
+
 def resource_path(relative_path):
     # PyInstaller uses _MEIPASS; Nuitka (standalone & onefile) puts data
     # next to the module so __file__'s dir works for both modes + dev.
@@ -69,4 +72,5 @@ if __name__ == "__main__":
     else:
         from ui_classic import run
 
-    run(settings, save_settings, resource_path, game_paths, restart_args)
+    run(settings, save_settings, resource_path, game_paths, restart_args,
+        current_version=CURRENT_VERSION, github_repo=GITHUB_REPO)

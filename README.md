@@ -1,6 +1,6 @@
 # Jackbox Party Pack Launcher
 
-A clean, no-frills launcher for all 10 Jackbox Party Packs. Pick a pack, hit Play — that's it. Now with game suggestions based on player count and style.
+A clean, no-frills launcher for all 10 Jackbox Party Packs. Pick a pack, hit Play — that's it. Now with game suggestions, recently-played quick launch, and built-in update checks.
 
 ![Launcher screenshot](screenshot.png)
 
@@ -14,13 +14,15 @@ Head to [**Releases**](https://github.com/kimxnas/Jackbox-Partypack-Launcher/rel
 ## Features
 
 - **🎲 Find a Game** — slide-out panel that recommends specific Jackbox games based on player count and style (Trivia, Drawing, Comedy, Bluffing, Social, Music). List all matches or let it randomly pick one for you
+- **Recently played** — your last 3 launched packs appear as quick-launch chips above the dropdown
 - **Classic & Modern UI** — toggle between the original look and a sleek dark Jackbox-themed theme in settings
-- **Game cover art** — shows the box art for whichever pack you've selected
+- **Game cover art** — rounded box art that updates as you switch packs
 - **Auto-detect** — point it at your games folder and it finds all the exes automatically
 - **Per-game path config** — set or override any path individually via the ⚙ settings menu
+- **Visibility toggles** — hide Recently Played or the Find a Game button if you prefer a minimal view
+- **Check for updates** — one click in settings tells you if a newer release is on GitHub
 - **Settings persist** — your paths and preferences live in `%APPDATA%\JackboxLauncher` and survive moves/updates
-- **Close after launch** — optionally close the launcher once the game starts
-- **Launch confirmation** — optional popup confirming the game launched
+- **Close after launch / launch confirmation** — optional behaviors, configured in settings
 
 ## How to use
 
@@ -34,9 +36,8 @@ Head to [**Releases**](https://github.com/kimxnas/Jackbox-Partypack-Launcher/rel
 
 ## Planned
 
-- **Recently played** — track and quickly relaunch your most played packs
-- **Check for updates** — built-in notification when a new release lands
 - **Custom banners** — let users swap in their own header image
+- **Installer** — proper Windows installer for instant startup (no extraction each launch)
 
 ## Build from source
 
