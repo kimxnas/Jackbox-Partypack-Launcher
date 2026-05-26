@@ -3,9 +3,13 @@ from tkinter import ttk, messagebox, filedialog
 import subprocess
 from PIL import Image, ImageTk
 import os
-import re
 import sys
 from pathlib import Path
+
+from shared import (
+    sanitize_name, validate_exe_path, auto_detect_games,
+    track_recent, track_stats, get_banner_path,
+)
 
 def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
         current_version="1.0.0", github_repo=""):
@@ -21,7 +25,8 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
         pass
 
     try:
-        banner_img = Image.open(resource_path_fn("1111111111.png")).resize((580, 80), Image.Resampling.LANCZOS)
+        banner_src = get_banner_path(settings, resource_path_fn("1111111111.png"))
+        banner_img = Image.open(banner_src).resize((580, 80), Image.Resampling.LANCZOS)
         banner_photo = ImageTk.PhotoImage(banner_img)
         tk.Label(root, image=banner_photo).pack(pady=5)
     except Exception:
@@ -29,10 +34,6 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
 
     game_image_label = tk.Label(root)
     game_image_label.pack()
-
-    def sanitize_name(name):
-        safe = name.replace(" ", "_")
-        return re.sub(r'[^A-Za-z0-9_-]', '', safe)
 
     def update_game_image(*args):
         game_name = selected_game.get()
@@ -115,13 +116,7 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
             folder = filedialog.askdirectory(title="Select folder to search for Jackbox games", parent=win)
             if not folder:
                 return
-            name_to_game = {(n + ".exe").lower(): n for n in game_paths}
-            found = {}
-            for dirpath, _, filenames in os.walk(folder):
-                for fname in filenames:
-                    key = fname.lower()
-                    if key in name_to_game and key not in found:
-                        found[name_to_game[key]] = os.path.join(dirpath, fname)
+            found = auto_detect_games(folder, game_paths)
             if not found:
                 messagebox.showinfo("Auto-detect", "No Jackbox games found in that folder.", parent=win)
                 return
@@ -177,12 +172,17 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
 
     def launch_game():
         game_name = selected_game.get()
-        game_path = Path(game_paths[game_name])
-        if not game_path.is_file():
-            messagebox.showerror("Error", f"Game executable not found:\n{game_path}\n\nSet the correct path in ⚙ Settings.")
+        path_str = game_paths.get(game_name, "")
+        ok, reason = validate_exe_path(path_str)
+        if not ok:
+            messagebox.showerror("Error",
+                f"Can't launch {game_name}:\n{reason}\n\nFix in ⚙ Settings.")
             return
+        game_path = Path(path_str)
         try:
-            subprocess.Popen([str(game_path)], cwd=str(game_path.parent))
+            subprocess.Popen([str(game_path)], cwd=str(game_path.parent), shell=False)
+            track_recent(settings, save_settings_fn, game_name)
+            track_stats(settings, save_settings_fn, game_name)
             if prompt_var.get():
                 messagebox.showinfo("Launching", f"Launching {game_name}!")
             if close_var.get():

@@ -2,14 +2,20 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw
 import os
-import re
 import sys
 import json
 import random
+import threading
 import webbrowser
 import subprocess
 import urllib.request
 from pathlib import Path
+
+from shared import (
+    sanitize_name, validate_exe_path, validate_image_path,
+    auto_detect_games, track_recent, track_stats, get_top_stats,
+    get_banner_path, version_tuple,
+)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -113,11 +119,6 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
     panel_open   = [False]
     anim_running = [False]
 
-    def version_tuple(v):
-        try:
-            return tuple(int(x) for x in v.lstrip('v').split('.'))
-        except Exception:
-            return (0,)
 
     root = ctk.CTk()
     root.title("Jackbox Launcher")
@@ -181,9 +182,6 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
     img_label = ctk.CTkLabel(left, text="")
     img_label.pack(pady=(14, 0))
 
-    def sanitize(name):
-        return re.sub(r'[^A-Za-z0-9_-]', '', name.replace(" ", "_"))
-
     def round_image(pil, inner_radius=14, border=2, ssaa=4):
         """Bake border + rounded corners into a single flat image (no CTk frame needed)."""
         inner_w, inner_h = 560, 214
@@ -218,7 +216,7 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
         return result
 
     def update_image(*_):
-        key = sanitize(selected_game.get())
+        key = sanitize_name(selected_game.get())
         if key in image_cache:
             img_label.configure(image=image_cache[key])
             return
@@ -449,7 +447,7 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
     def open_settings():
         win = ctk.CTkToplevel(root)
         win.title("Settings")
-        win.geometry("680x720")
+        win.geometry("700x600")
         win.resizable(False, False)
         win.grab_set()
         win.configure(fg_color=BG)
@@ -459,61 +457,170 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
         except Exception:
             pass
 
-        style_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
-        style_card.pack(padx=16, pady=(14, 0), fill="x")
-        ctk.CTkLabel(style_card, text="UI Style", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", padx=14, pady=(10, 4))
+        # Tabs
+        tabs = ctk.CTkTabview(
+            win, fg_color=FRAME_BG,
+            segmented_button_fg_color=CARD_BG,
+            segmented_button_selected_color=YELLOW,
+            segmented_button_selected_hover_color=YELLOW_H,
+            segmented_button_unselected_color=CARD_BG,
+            segmented_button_unselected_hover_color=BORDER,
+            text_color="#0D0920",
+            corner_radius=12,
+        )
+        tabs.pack(padx=16, pady=(14, 0), fill="both", expand=True)
+        tab_general = tabs.add("General")
+        tab_paths   = tabs.add("Game Paths")
+        tab_about   = tabs.add("About")
 
+        # ── GENERAL TAB ───────────────────────────────────────────────
+        gen = ctk.CTkScrollableFrame(tab_general, fg_color="transparent",
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=PINK)
+        gen.pack(fill="both", expand=True)
+
+        # UI Style
+        ctk.CTkLabel(gen, text="UI Style", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", pady=(4, 4))
         style_var = ctk.StringVar(value=settings.get("ui_theme", "modern"))
         ctk.CTkSegmentedButton(
-            style_card, values=["classic", "modern"], variable=style_var,
+            gen, values=["classic", "modern"], variable=style_var,
             fg_color=CARD_BG, selected_color=YELLOW, selected_hover_color=YELLOW_H,
             unselected_color=CARD_BG, unselected_hover_color=BORDER,
             text_color="#0D0920", font=("Segoe UI", 12),
-        ).pack(padx=14, pady=(0, 12), anchor="w")
+        ).pack(anchor="w", pady=(0, 14))
 
-        # Launch behavior
-        beh_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
-        beh_card.pack(padx=16, pady=(10, 0), fill="x")
-        ctk.CTkLabel(beh_card, text="Launch Behavior", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", padx=14, pady=(10, 4))
-
+        # Launch Behavior
+        ctk.CTkLabel(gen, text="Launch Behavior", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", pady=(0, 4))
         close_set_var  = ctk.BooleanVar(value=settings.get("close_after_launch", False))
         prompt_set_var = ctk.BooleanVar(value=settings.get("show_launch_prompt", True))
-
         for text, var in [("Close launcher after launch", close_set_var),
                           ("Show launch confirmation", prompt_set_var)]:
-            ctk.CTkCheckBox(
-                beh_card, text=text, variable=var,
+            ctk.CTkCheckBox(gen, text=text, variable=var,
                 font=("Segoe UI", 11), text_color=SUBTEXT,
                 fg_color=PINK, hover_color=PINK_H,
                 checkmark_color=TEXT, border_color=BORDER,
-            ).pack(anchor="w", padx=14, pady=2)
-        ctk.CTkFrame(beh_card, fg_color="transparent", height=8).pack()
+            ).pack(anchor="w", pady=2)
 
-        # Visibility toggles
-        vis_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
-        vis_card.pack(padx=16, pady=(10, 0), fill="x")
-        ctk.CTkLabel(vis_card, text="Visibility", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", padx=14, pady=(10, 4))
-
+        # Visibility
+        ctk.CTkLabel(gen, text="Visibility", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", pady=(14, 4))
         show_recent_var = ctk.BooleanVar(value=settings.get("show_recent", True))
         show_find_var   = ctk.BooleanVar(value=settings.get("show_find_a_game", True))
-
         for text, var in [("Show recently played", show_recent_var),
                           ("Show Find a Game button", show_find_var)]:
-            ctk.CTkCheckBox(
-                vis_card, text=text, variable=var,
+            ctk.CTkCheckBox(gen, text=text, variable=var,
                 font=("Segoe UI", 11), text_color=SUBTEXT,
                 fg_color=PINK, hover_color=PINK_H,
                 checkmark_color=TEXT, border_color=BORDER,
-            ).pack(anchor="w", padx=14, pady=2)
-        ctk.CTkFrame(vis_card, fg_color="transparent", height=8).pack()
+            ).pack(anchor="w", pady=2)
 
-        # About / Updates
-        about_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
-        about_card.pack(padx=16, pady=(10, 0), fill="x")
+        # Custom Banner
+        ctk.CTkLabel(gen, text="Custom Banner", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", pady=(14, 4))
+        ctk.CTkLabel(gen, text="Used in the classic UI header. PNG or JPG, under 10 MB.",
+                     font=("Segoe UI", 10), text_color=SUBTEXT).pack(anchor="w")
 
-        about_row = ctk.CTkFrame(about_card, fg_color="transparent")
-        about_row.pack(padx=14, pady=10, fill="x")
-        ctk.CTkLabel(about_row, text=f"Version {current_version}",
+        banner_row = ctk.CTkFrame(gen, fg_color="transparent")
+        banner_row.pack(pady=(4, 4), fill="x")
+        banner_var = ctk.StringVar(value=settings.get("custom_banner", "") or "(default)")
+        ctk.CTkEntry(banner_row, textvariable=banner_var, font=("Segoe UI", 10),
+                     fg_color=CARD_BG, border_color=BORDER, text_color=TEXT,
+                     state="readonly").pack(side="left", padx=(0, 6), fill="x", expand=True)
+
+        def pick_banner():
+            path = filedialog.askopenfilename(
+                title="Choose banner image",
+                filetypes=[("Image", "*.png *.jpg *.jpeg"), ("All files", "*.*")],
+                parent=win,
+            )
+            if not path:
+                return
+            ok, reason = validate_image_path(path)
+            if not ok:
+                messagebox.showerror("Invalid image", reason, parent=win)
+                return
+            banner_var.set(path)
+
+        def reset_banner():
+            banner_var.set("(default)")
+
+        ctk.CTkButton(banner_row, text="Choose…", command=pick_banner,
+                      fg_color=CARD_BG, hover_color=BORDER, width=80, height=28,
+                      font=("Segoe UI", 10), corner_radius=8).pack(side="left", padx=2)
+        ctk.CTkButton(banner_row, text="Reset", command=reset_banner,
+                      fg_color=CARD_BG, hover_color=BORDER, width=60, height=28,
+                      font=("Segoe UI", 10), corner_radius=8).pack(side="left")
+
+        # ── GAME PATHS TAB ────────────────────────────────────────────
+        paths_top = ctk.CTkFrame(tab_paths, fg_color="transparent")
+        paths_top.pack(fill="x", pady=(4, 6))
+        ctk.CTkLabel(paths_top, text="Configure each pack's .exe path",
+                     font=("Segoe UI", 11), text_color=SUBTEXT).pack(side="left")
+
+        entries = {}
+
+        def auto_detect():
+            folder = filedialog.askdirectory(title="Select games folder", parent=win)
+            if not folder:
+                return
+            found = auto_detect_games(folder, game_paths)
+            if not found:
+                messagebox.showinfo("Auto-detect", "No Jackbox games found.", parent=win)
+                return
+            for game, path in found.items():
+                entries[game].set(path)
+            missed = [g for g in game_paths if g not in found]
+            msg = f"Found {len(found)} game(s)."
+            if missed:
+                msg += f"\n\nNot found ({len(missed)}):\n" + "\n".join(f"  • {g}" for g in missed)
+            messagebox.showinfo("Auto-detect", msg, parent=win)
+
+        ctk.CTkButton(paths_top, text="Auto-detect from folder…", command=auto_detect,
+                      fg_color=CARD_BG, hover_color=BORDER,
+                      font=("Segoe UI", 11), height=30, corner_radius=8).pack(side="right")
+
+        scroll = ctk.CTkScrollableFrame(tab_paths, fg_color="transparent",
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=PINK)
+        scroll.pack(fill="both", expand=True)
+
+        for game_name in game_paths:
+            row = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=8)
+            row.pack(fill="x", pady=3)
+            ctk.CTkLabel(row, text=game_name, font=("Segoe UI", 11), text_color=TEXT, width=190, anchor="w").pack(side="left", padx=10, pady=7)
+            var = ctk.StringVar(value=game_paths.get(game_name, ""))
+            ctk.CTkEntry(row, textvariable=var, font=("Segoe UI", 10), width=280, fg_color=FRAME_BG, border_color=BORDER, text_color=TEXT).pack(side="left", padx=6)
+
+            def browse(v=var, n=game_name):
+                initial = str(Path(v.get()).parent) if Path(v.get()).parent.exists() else "C:\\"
+                path = filedialog.askopenfilename(
+                    title=f"Select exe for {n}",
+                    filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
+                    initialdir=initial, parent=win,
+                )
+                if path:
+                    v.set(path)
+
+            ctk.CTkButton(row, text="Browse…", command=browse, width=82, height=28, fg_color=BORDER, hover_color=PINK, font=("Segoe UI", 10), corner_radius=6).pack(side="left", padx=(0, 8))
+            entries[game_name] = var
+
+        # ── ABOUT TAB ─────────────────────────────────────────────────
+        # Pack Stats
+        ctk.CTkLabel(tab_about, text="Pack Stats", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", pady=(4, 6))
+        top = get_top_stats(settings, top_n=10)
+        if not top:
+            ctk.CTkLabel(tab_about, text="No launches yet — go play something!",
+                         font=("Segoe UI", 11), text_color=SUBTEXT).pack(anchor="w", pady=(0, 10))
+        else:
+            for pack, count in top:
+                short = pack.replace("The Jackbox Party Pack", "Pack")
+                row = ctk.CTkFrame(tab_about, fg_color=CARD_BG, corner_radius=8)
+                row.pack(fill="x", pady=2)
+                ctk.CTkLabel(row, text=short, font=("Segoe UI", 11),
+                             text_color=TEXT, anchor="w").pack(side="left", padx=12, pady=6)
+                ctk.CTkLabel(row, text=f"{count} {'launch' if count == 1 else 'launches'}",
+                             font=("Segoe UI", 11, "bold"), text_color=CYAN).pack(side="right", padx=12, pady=6)
+
+        # Version + Check
+        ver_row = ctk.CTkFrame(tab_about, fg_color="transparent")
+        ver_row.pack(fill="x", pady=(20, 0))
+        ctk.CTkLabel(ver_row, text=f"Version {current_version}",
                      font=("Segoe UI", 11), text_color=SUBTEXT).pack(side="left")
 
         def manual_check():
@@ -533,75 +640,9 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
             except Exception as e:
                 messagebox.showerror("Update check failed", f"Couldn't reach GitHub:\n{e}", parent=win)
 
-        ctk.CTkButton(
-            about_row, text="Check for updates", command=manual_check,
-            fg_color=CARD_BG, hover_color=BORDER,
-            font=("Segoe UI", 11), height=28, corner_radius=8, width=140,
-        ).pack(side="right")
-
-        paths_card = ctk.CTkFrame(win, fg_color=FRAME_BG, corner_radius=12)
-        paths_card.pack(padx=16, pady=(10, 0), fill="both", expand=True)
-
-        top_row = ctk.CTkFrame(paths_card, fg_color="transparent")
-        top_row.pack(padx=14, pady=(10, 6), fill="x")
-        ctk.CTkLabel(top_row, text="Game Paths", font=("Segoe UI Black", 13), text_color=YELLOW).pack(side="left")
-
-        entries = {}
-
-        def auto_detect():
-            folder = filedialog.askdirectory(title="Select games folder", parent=win)
-            if not folder:
-                return
-            name_to_game = {(n + ".exe").lower(): n for n in game_paths}
-            found = {}
-            for dirpath, _, filenames in os.walk(folder):
-                for fname in filenames:
-                    key = fname.lower()
-                    if key in name_to_game and name_to_game[key] not in found:
-                        found[name_to_game[key]] = os.path.join(dirpath, fname)
-            if not found:
-                messagebox.showinfo("Auto-detect", "No Jackbox games found.", parent=win)
-                return
-            for game, path in found.items():
-                entries[game].set(path)
-            missed = [g for g in game_paths if g not in found]
-            msg = f"Found {len(found)} game(s)."
-            if missed:
-                msg += f"\n\nNot found ({len(missed)}):\n" + "\n".join(f"  • {g}" for g in missed)
-            messagebox.showinfo("Auto-detect", msg, parent=win)
-
-        ctk.CTkButton(
-            top_row, text="Auto-detect from folder…", command=auto_detect,
-            fg_color=CARD_BG, hover_color=BORDER,
-            font=("Segoe UI", 11), height=30, corner_radius=8,
-        ).pack(side="right")
-
-        scroll = ctk.CTkScrollableFrame(
-            paths_card, fg_color="transparent",
-            scrollbar_button_color=BORDER,
-            scrollbar_button_hover_color=PINK,
-        )
-        scroll.pack(padx=14, pady=(0, 10), fill="both", expand=True)
-
-        for game_name in game_paths:
-            row = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=8)
-            row.pack(fill="x", pady=3)
-            ctk.CTkLabel(row, text=game_name, font=("Segoe UI", 11), text_color=TEXT, width=190, anchor="w").pack(side="left", padx=10, pady=7)
-            var = ctk.StringVar(value=game_paths.get(game_name, ""))
-            ctk.CTkEntry(row, textvariable=var, font=("Segoe UI", 10), width=290, fg_color=FRAME_BG, border_color=BORDER, text_color=TEXT).pack(side="left", padx=6)
-
-            def browse(v=var, n=game_name):
-                initial = str(Path(v.get()).parent) if Path(v.get()).parent.exists() else "C:\\"
-                path = filedialog.askopenfilename(
-                    title=f"Select exe for {n}",
-                    filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
-                    initialdir=initial, parent=win,
-                )
-                if path:
-                    v.set(path)
-
-            ctk.CTkButton(row, text="Browse…", command=browse, width=82, height=28, fg_color=BORDER, hover_color=PINK, font=("Segoe UI", 10), corner_radius=6).pack(side="left", padx=(0, 8))
-            entries[game_name] = var
+        ctk.CTkButton(ver_row, text="Check for updates", command=manual_check,
+                      fg_color=CARD_BG, hover_color=BORDER,
+                      font=("Segoe UI", 11), height=28, corner_radius=8, width=140).pack(side="right")
 
         def save_all():
             for name, var in entries.items():
@@ -614,6 +655,8 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
             settings["show_find_a_game"] = show_find_var.get()
             settings["close_after_launch"] = close_set_var.get()
             settings["show_launch_prompt"] = prompt_set_var.get()
+            banner_choice = banner_var.get()
+            settings["custom_banner"] = "" if banner_choice == "(default)" else banner_choice
             save_settings_fn(settings)
 
             # Sync the local BooleanVars used by launch_game
@@ -645,30 +688,48 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
         ).pack(pady=(10, 14))
 
     # ── Launch ────────────────────────────────────────────────────────
-    def track_recent(name):
-        recent = settings.get("recent_games", [])
-        if name in recent:
-            recent.remove(name)
-        recent.insert(0, name)
-        settings["recent_games"] = recent[:3]
-        save_settings_fn(settings)
-        render_recent()
-
     def launch_game():
         name = selected_game.get()
-        path = Path(game_paths[name])
-        if not path.is_file():
-            messagebox.showerror("Error", f"Exe not found:\n{path}\n\nSet the path in ⚙ Settings.", parent=root)
+        path_str = game_paths.get(name, "")
+        ok, reason = validate_exe_path(path_str)
+        if not ok:
+            messagebox.showerror("Error",
+                f"Can't launch {name}:\n{reason}\n\nPath: {path_str}\n\nFix it in ⚙ Settings.",
+                parent=root)
             return
+        path = Path(path_str)
         try:
-            subprocess.Popen([str(path)], cwd=str(path.parent))
-            track_recent(name)
+            subprocess.Popen([str(path)], cwd=str(path.parent), shell=False)
+            track_recent(settings, save_settings_fn, name)
+            track_stats(settings, save_settings_fn, name)
+            render_recent()
             if prompt_var.get():
                 messagebox.showinfo("Launching", f"Launching {name}!", parent=root)
             if close_var.get():
                 root.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch:\n{e}", parent=root)
+
+    # Background preload — warm the cache so dropdown switching is instant
+    def preload_images():
+        for game_name in game_paths:
+            key = sanitize_name(game_name)
+            if key in image_cache:
+                continue
+            for ext in [".jpg", ".jpeg", ".png", ".webp"]:
+                p = Path(resource_path_fn("game_images")) / f"{key}{ext}"
+                if p.exists():
+                    try:
+                        pil = Image.open(p)
+                        pil = round_image(pil)
+                        # CTkImage must be created on the main thread — schedule it
+                        root.after(0, lambda k=key, im=pil: image_cache.setdefault(
+                            k, ctk.CTkImage(light_image=im, dark_image=im, size=(564, 218))))
+                    except Exception:
+                        pass
+                    break
+
+    threading.Thread(target=preload_images, daemon=True).start()
 
     update_image()
     render_recent()

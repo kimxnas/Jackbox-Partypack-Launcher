@@ -38,6 +38,13 @@ jobs:
           --onefile-tempdir-spec="%CACHE_DIR%/JackboxLauncher"
           --include-data-dir=game_images=game_images
           --include-data-files=icon.ico=icon.ico
+          --include-module=ui_classic
+          --include-module=ui_modern
+          --include-module=shared
+          --nofollow-import-to=numpy
+          --nofollow-import-to=matplotlib
+          --nofollow-import-to=setuptools
+          --nofollow-import-to=pip
           --output-filename=JackboxPartypackLauncher.exe
           launcher.py
 
