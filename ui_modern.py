@@ -15,6 +15,8 @@ from shared import (
     sanitize_name, validate_exe_path, validate_image_path,
     auto_detect_games, track_recent, track_stats, get_top_stats,
     get_banner_path, version_tuple,
+    detect_steam_jackbox, export_settings, import_settings,
+    is_autostart_enabled, set_autostart, get_last_played,
 )
 
 ctk.set_appearance_mode("dark")
@@ -34,7 +36,7 @@ TEXT     = "#FFFFFF"
 SUBTEXT  = "#C0A0E0"
 
 BASE_W  = 620
-BASE_H  = 485
+BASE_H  = 505
 PANEL_W = 340
 ANIM_FRAMES   = 20
 ANIM_INTERVAL = 8
@@ -235,15 +237,63 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
     selected_game = ctk.StringVar(value=list(game_paths.keys())[0])
     selected_game.trace_add("write", update_image)
 
+    dd_row = ctk.CTkFrame(left, fg_color="transparent")
+    dd_row.pack(pady=(12, 0))
+
     ctk.CTkOptionMenu(
-        left, variable=selected_game,
+        dd_row, variable=selected_game,
         values=list(game_paths.keys()),
         fg_color=CARD_BG, button_color=BORDER, button_hover_color=PINK,
         text_color=TEXT, font=("Segoe UI", 13),
         dropdown_fg_color=FRAME_BG, dropdown_text_color=TEXT,
         dropdown_hover_color=BORDER,
-        dynamic_resizing=False, width=580, height=44, corner_radius=10,
-    ).pack(pady=(12, 0))
+        dynamic_resizing=False, width=536, height=44, corner_radius=10,
+    ).pack(side="left", padx=(0, 6))
+
+    def show_pack_info():
+        pack = selected_game.get()
+        games = GAME_INFO.get(pack, [])
+        info_win = ctk.CTkToplevel(root)
+        info_win.title(pack)
+        info_win.geometry("400x340")
+        info_win.resizable(False, False)
+        info_win.grab_set()
+        info_win.configure(fg_color=BG)
+        try:
+            info_win.iconbitmap(resource_path_fn('icon.ico'))
+        except Exception:
+            pass
+        ctk.CTkLabel(info_win, text=pack, font=("Impact", 22), text_color=YELLOW,
+                     wraplength=380).pack(pady=(14, 4))
+        ctk.CTkLabel(info_win, text="Games in this pack:",
+                     font=("Segoe UI", 11), text_color=SUBTEXT).pack(pady=(0, 6))
+        for g in games:
+            row = ctk.CTkFrame(info_win, fg_color=CARD_BG, corner_radius=8)
+            row.pack(fill="x", padx=14, pady=2)
+            ctk.CTkLabel(row, text=g["name"], font=("Segoe UI", 11, "bold"),
+                         text_color=TEXT).pack(side="left", padx=10, pady=6)
+            tag_str = " · ".join(sorted(g["tags"]))
+            ctk.CTkLabel(row, text=f"{g['min']}-{g['max']} • {tag_str}",
+                         font=("Segoe UI", 10), text_color=SUBTEXT).pack(side="right", padx=10, pady=6)
+
+    ctk.CTkButton(
+        dd_row, text="ⓘ", width=38, height=44, corner_radius=10,
+        fg_color=CARD_BG, hover_color=BORDER, text_color=CYAN,
+        font=("Segoe UI", 16), command=show_pack_info,
+    ).pack(side="left")
+
+    # Last played indicator (under dropdown)
+    last_played_var = ctk.StringVar(value="")
+    last_played_label = ctk.CTkLabel(left, textvariable=last_played_var,
+                                     font=("Segoe UI", 10), text_color=SUBTEXT)
+    last_played_label.pack(pady=(2, 0))
+
+    def update_last_played(*_):
+        pack = selected_game.get()
+        rel = get_last_played(settings, pack)
+        last_played_var.set(f"Last played {rel}" if rel else "")
+
+    selected_game.trace_add("write", update_last_played)
 
     # ── Recently played row ───────────────────────────────────────────
     recent_frame = ctk.CTkFrame(left, fg_color="transparent")
@@ -490,10 +540,12 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
 
         # Launch Behavior
         ctk.CTkLabel(gen, text="Launch Behavior", font=("Segoe UI Black", 13), text_color=YELLOW).pack(anchor="w", pady=(0, 4))
-        close_set_var  = ctk.BooleanVar(value=settings.get("close_after_launch", False))
-        prompt_set_var = ctk.BooleanVar(value=settings.get("show_launch_prompt", True))
+        close_set_var      = ctk.BooleanVar(value=settings.get("close_after_launch", False))
+        prompt_set_var     = ctk.BooleanVar(value=settings.get("show_launch_prompt", True))
+        autostart_set_var  = ctk.BooleanVar(value=is_autostart_enabled())
         for text, var in [("Close launcher after launch", close_set_var),
-                          ("Show launch confirmation", prompt_set_var)]:
+                          ("Show launch confirmation", prompt_set_var),
+                          ("Start with Windows", autostart_set_var)]:
             ctk.CTkCheckBox(gen, text=text, variable=var,
                 font=("Segoe UI", 11), text_color=SUBTEXT,
                 fg_color=PINK, hover_color=PINK_H,
@@ -572,6 +624,25 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
                 msg += f"\n\nNot found ({len(missed)}):\n" + "\n".join(f"  • {g}" for g in missed)
             messagebox.showinfo("Auto-detect", msg, parent=win)
 
+        def steam_detect():
+            found = detect_steam_jackbox(game_paths)
+            if not found:
+                messagebox.showinfo("Steam detect",
+                    "No Jackbox packs found in your Steam library.\n\n"
+                    "Make sure Steam is installed and the packs are installed via Steam.",
+                    parent=win)
+                return
+            for game, path in found.items():
+                entries[game].set(path)
+            messagebox.showinfo("Steam detect",
+                f"Found {len(found)} pack(s) installed via Steam:\n\n" +
+                "\n".join(f"  • {g.replace('The Jackbox Party Pack', 'Pack')}" for g in found),
+                parent=win)
+
+        ctk.CTkButton(paths_top, text="🎮 Detect from Steam", command=steam_detect,
+                      fg_color=CARD_BG, hover_color=BORDER, text_color=CYAN,
+                      font=("Segoe UI", 11), height=30, corner_radius=8).pack(side="right", padx=(0, 6))
+
         ctk.CTkButton(paths_top, text="Auto-detect from folder…", command=auto_detect,
                       fg_color=CARD_BG, hover_color=BORDER,
                       font=("Segoe UI", 11), height=30, corner_radius=8).pack(side="right")
@@ -617,9 +688,60 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
                 ctk.CTkLabel(row, text=f"{count} {'launch' if count == 1 else 'launches'}",
                              font=("Segoe UI", 11, "bold"), text_color=CYAN).pack(side="right", padx=12, pady=6)
 
+        # Backup / restore
+        backup_row = ctk.CTkFrame(tab_about, fg_color="transparent")
+        backup_row.pack(fill="x", pady=(20, 6))
+        ctk.CTkLabel(backup_row, text="Backup settings",
+                     font=("Segoe UI", 11), text_color=SUBTEXT).pack(side="left")
+
+        def export_now():
+            path = filedialog.asksaveasfilename(
+                title="Export settings to…",
+                defaultextension=".json",
+                initialfile="jackbox-launcher-settings.json",
+                filetypes=[("JSON", "*.json")],
+                parent=win,
+            )
+            if not path:
+                return
+            ok, err = export_settings(settings, path)
+            if ok:
+                messagebox.showinfo("Exported", f"Settings exported to:\n{path}", parent=win)
+            else:
+                messagebox.showerror("Export failed", err, parent=win)
+
+        def import_now():
+            path = filedialog.askopenfilename(
+                title="Import settings from…",
+                filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+                parent=win,
+            )
+            if not path:
+                return
+            ok, data = import_settings(path)
+            if not ok:
+                messagebox.showerror("Import failed", str(data), parent=win)
+                return
+            if not messagebox.askyesno("Overwrite settings?",
+                "This will replace your current settings and restart the launcher. Continue?",
+                parent=win):
+                return
+            settings.clear()
+            settings.update(data)
+            save_settings_fn(settings)
+            subprocess.Popen(restart_args, creationflags=0x00000008)
+            root.destroy()
+
+        ctk.CTkButton(backup_row, text="Export", command=export_now,
+                      fg_color=CARD_BG, hover_color=BORDER,
+                      font=("Segoe UI", 11), height=28, corner_radius=8, width=80).pack(side="right", padx=2)
+        ctk.CTkButton(backup_row, text="Import", command=import_now,
+                      fg_color=CARD_BG, hover_color=BORDER,
+                      font=("Segoe UI", 11), height=28, corner_radius=8, width=80).pack(side="right")
+
         # Version + Check
         ver_row = ctk.CTkFrame(tab_about, fg_color="transparent")
-        ver_row.pack(fill="x", pady=(20, 0))
+        ver_row.pack(fill="x", pady=(10, 0))
         ctk.CTkLabel(ver_row, text=f"Version {current_version}",
                      font=("Segoe UI", 11), text_color=SUBTEXT).pack(side="left")
 
@@ -657,6 +779,8 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
             settings["show_launch_prompt"] = prompt_set_var.get()
             banner_choice = banner_var.get()
             settings["custom_banner"] = "" if banner_choice == "(default)" else banner_choice
+            # Apply autostart setting via registry
+            set_autostart(autostart_set_var.get())
             save_settings_fn(settings)
 
             # Sync the local BooleanVars used by launch_game
@@ -703,6 +827,7 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
             track_recent(settings, save_settings_fn, name)
             track_stats(settings, save_settings_fn, name)
             render_recent()
+            update_last_played()
             if prompt_var.get():
                 messagebox.showinfo("Launching", f"Launching {name}!", parent=root)
             if close_var.get():
@@ -733,4 +858,5 @@ def run(settings, save_settings_fn, resource_path_fn, game_paths, restart_args,
 
     update_image()
     render_recent()
+    update_last_played()
     root.mainloop()

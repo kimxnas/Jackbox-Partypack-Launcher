@@ -1,6 +1,6 @@
 # Jackbox Party Pack Launcher
 
-A clean, no-frills launcher for all 10 Jackbox Party Packs. Pick a pack, hit Play — that's it. Now with game suggestions, recently-played quick launch, pack stats, custom banners, and built-in update checks.
+A clean, no-frills launcher for all 10 Jackbox Party Packs. Pick a pack, hit Play — that's it.
 
 ![Launcher screenshot](screenshot.png)
 
@@ -13,34 +13,39 @@ Head to [**Releases**](https://github.com/kimxnas/Jackbox-Partypack-Launcher/rel
 
 ## Features
 
-- **🎲 Find a Game** — slide-out panel that recommends specific Jackbox games based on player count and style (Trivia, Drawing, Comedy, Bluffing, Social, Music). List all matches or let it randomly pick one for you
-- **Recently played** — your last 3 launched packs appear as quick-launch chips above the dropdown
+- **🎲 Find a Game** — slide-out panel that recommends specific Jackbox games based on player count and style (Trivia, Drawing, Comedy, Bluffing, Social, Music). List all matches or let it randomly pick one
+- **Recently played** — your last 3 launched packs as quick-launch chips
+- **Last-played indicator** — see when you last played each pack at a glance
+- **🎮 Steam auto-detect** — read your Steam library and auto-import installed Jackbox packs in one click
+- **Folder auto-detect** — alternative method: point at any folder and find Jackbox exes recursively
+- **Pack info** — click ⓘ next to the dropdown to see what games are in the selected pack with player counts and tags
 - **Pack stats** — see your most-played packs ranked in settings
 - **Custom banners** — swap in your own header image (classic UI)
-- **Classic & Modern UI** — toggle between the original look and a sleek dark Jackbox-themed theme in settings
-- **Game cover art** — smoothly rounded box art that updates as you switch packs (preloaded in the background for instant switching)
-- **Auto-detect** — point it at your games folder and it finds all the exes automatically
-- **Per-game path config** — set or override any path individually via the ⚙ settings menu
-- **Tabbed settings** — General / Game Paths / About — no more endless scrolling
+- **Classic & Modern UI** — toggle between the original look and a sleek dark Jackbox-themed theme. **Both UIs now have proper tabbed settings**
+- **Game cover art** — smoothly rounded box art (preloaded in the background for instant switching)
+- **Tabbed settings** — General / Game Paths / About — clean and discoverable
 - **Visibility toggles** — hide Recently Played or the Find a Game button if you prefer a minimal view
-- **Check for updates** — one click in settings tells you if a newer release is on GitHub
-- **Settings persist** — your paths and preferences live in `%APPDATA%\JackboxLauncher` and survive moves/updates
-- **Safe by default** — exe paths are validated (must be a real `.exe`), banners size-checked, subprocesses spawned with `shell=False`
+- **Check for updates** — one click in settings checks GitHub for a newer release
+- **Backup & restore** — export/import `launcher_settings.json` to move setups between PCs
+- **Start with Windows** — optional autostart toggle
+- **Settings persist** — your paths and preferences live in `%APPDATA%\JackboxLauncher`
+- **Safe by default** — exe paths validated, banners size-checked, subprocesses spawned with `shell=False`
 
 ## How to use
 
 1. Download `JackboxPartypackLauncher.exe` from [Releases](https://github.com/kimxnas/Jackbox-Partypack-Launcher/releases)
 2. Run it — no install needed
-3. Click **⚙** → **Game Paths** → **Auto-detect from folder…** and select your Jackbox games folder
+3. Click **⚙** → **Game Paths** → **🎮 Detect from Steam** (or auto-detect from a folder)
 4. (Optional) Switch to the modern UI and try **🎲 Find a Game** to get suggestions
 5. Select a pack from the dropdown and hit **Play!**
 
-> Settings are saved automatically in `%APPDATA%\JackboxLauncher`.
-
 ## Planned
 
+- **Direct game launch** — boot straight into a specific game inside a pack (research notes in `docs/direct-game-launch.md`)
 - **Inno Setup installer** — proper Windows installer for instant startup (no extraction each launch)
-- **Discord Rich Presence** — show what pack you're playing on your Discord status
+- **Discord Rich Presence** — show what pack you're playing on Discord status
+- **System tray mode** — close to tray, click tray icon to bring back
+- **CLI flags** — `JackboxPartypackLauncher.exe --launch "Pack 5"` for power users
 
 ## Build from source
 

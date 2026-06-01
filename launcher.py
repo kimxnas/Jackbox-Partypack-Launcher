@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-CURRENT_VERSION = "1.4.0"
+CURRENT_VERSION = "1.7.0"
 GITHUB_REPO = "kimxnas/Jackbox-Partypack-Launcher"
 
 def resource_path(relative_path):
